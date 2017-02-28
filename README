@@ -1,0 +1,135 @@
+==================
+   NMI Manager
+==================
+
+This module allows you to Panic or Ignore specific NMI events.
+
+
+Author: Adrien Mahieux <adrien.mahieux@gmail.com>
+Source: https://github.com/saruspete/nmimgr
+Tools:  https://github.com/saruspete/kdumptools
+        https://fr.slideshare.net/Saruspete/kernel-crashdump-53496836
+
+------------
+What is this
+------------
+
+Manage NMI events in a more fine-grained manner than "uknown_nmi_panic".
+When a production host is unresponsive, we'd like to take a Kernel Dump for
+offline issue analysis.
+If kdump is correctly setup, we need to crash/panic the system for it to start
+
+This is usually done by sending an NMI to the system (as no userland process
+is responding anymore) through the BMC (vendor specific).
+
+But if no handler registers the vendor-specific NMI event to trigger a crash,
+the kernel logs a "Dazed and confused, but trying to continue" message and 
+server is still unresponsive.
+
+
+-------------
+How to use it
+-------------
+
+Build it
+--------
+
+Built it for the current kernel:
+  # make
+
+Or specify custom/multiple versions if you have a build env
+  # make 2.6.32-642.15.1.el6.x86_64 3.10.0-327.36.1.el7.x86_64 4.8.13-100.fc23.x86_64
+
+
+Load the module (temporarily)
+-----------------------------
+
+Usage as a module (temp, insmod):
+ insmod nmimgr.ko events_panic=0,1,2,5-12,13,255 events_ignore=99
+
+
+
+Check the logs
+--------------
+
+As NMI should be a serious indicator, the module will generate some logs at
+startup and when handling a new NMI.
+
+When trying new hardware, you may just load the module, generate an NMI from
+the BMC and check dmesg for lines containing "nmimgr:", specifically the log
+"Handling new NMI". 
+The code you are interested in (the event) is the decimal value between ( )
+
+If you see this log: "Handling new NMI type:1 event:0x10 (16)"
+Then the event code generated is 16.
+To make the system panic:
+  # insmod nmimgr.ko events_panic=16
+To ignore it and disable messages:
+  # insmod nmimgr.ko events_ignore=16
+
+
+Add it permanently
+------------------
+
+Once checked it works with your kernel, you can make it more permanent:
+
+1) copy the module (file nmimgr.ko) in:
+    # cp nmimgr.kmod.$(uname -r)/nmimgr.ko /lib/modules/$(uname -r)/extra/
+2) Regen the module database:
+    # depmod -a
+3) Set the parameters for modprobe:
+    # echo "options nmimgr events_panic=16" > /etc/modprobe.d/nmimgr.conf
+4) Load it with modprobe
+    # modprobe nmimgr
+5) Check the parameters are correctly set (you should see your value)
+    # cat /sys/module/nmimgr/parameters/events_panic
+
+
+	
+Parameters
+----------
+
+- events_panic=LIST  Events to make the kernel Panic
+- events_ignore=LIST Events to drop, so no other handler can process them
+
+LIST is standard kernel lists, can be composed of 
+- simple lists:  0,13,16,44,10
+- ranges:        10-100
+- Mix of both:   0,1,2-8,10
+
+
+
+Should you embed it with your kernel, you can configure it with boot cmd:
+  nmimgr.events_panic=0,1,2,5-12,13,255 nmimgr.events_ignore=99
+
+
+--------------
+How to test it
+--------------
+
+Generate an NMI
+---------------
+
+- openipmi chassis power diag
+- vboxmanage debugvm "VMName" injectnmi
+- virsh inject-nmi "VMName"
+
+
+Usual generated NMI events (in decimal, to be used as module parameters):
+- HP Ilo : 32,48
+- Dell IDRAC: 32,33,48,49
+- IBM : 44,60
+- VirtualBox: 0,16,32,48
+
+
+-----------------------
+Kernel Revision history
+-----------------------
+
+2.6.32: Using notifier_block structs
+3.2   : Moved NMI descriptions to an enum: LOCAL, UNKNOWN, MAX 
+        https://lwn.net/Articles/461215/
+        https://lkml.org/lkml/2012/3/8/386
+3.5   : Moved "register_nmi_handler" to a macro + static struct nmiaction fn##_na
+        This broke the loop logic used between 3.2 and 3.5
+
