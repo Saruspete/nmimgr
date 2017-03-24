@@ -14,17 +14,42 @@ Tools:  https://github.com/saruspete/kdumptools
 What is this
 ------------
 
-Manage NMI events in a more fine-grained manner than "uknown_nmi_panic".
+Manage NMI events in a more fine-grained manner than "unknown_nmi_panic" sysctl.
+
+
 When a production host is unresponsive, we'd like to take a Kernel Dump for
 offline issue analysis.
 If kdump is correctly setup, we need to crash/panic the system for it to start
 
 This is usually done by sending an NMI to the system (as no userland process
-is responding anymore) through the BMC (vendor specific).
+is responding anymore) through the BMC (which name and implementation is
+vendor specific).
 
 But if no handler registers the vendor-specific NMI event to trigger a crash,
 the kernel logs a "Dazed and confused, but trying to continue" message and 
 server is still unresponsive.
+
+
+----------------------------------------
+Why not just using "nmi_panic" sysctls ?
+----------------------------------------
+
+There is 3 sysctls that allows administrators to generate a panic:
+- panic_on_io_nmi
+- panic_on_unrecovered_nmi
+- unknown_nmi_panic
+
+These sysctl are overkill as multiple NMI can be generated for non-critical
+events like:
+- Software debugging, like perf on Pentium processors
+- External cards like FPGA to communicate
+- Motherboard alerts of a dying Power-Supply
+
+
+If you are fine with the current unknown_nmi_panic settings, this module can
+also be used to ignore other NMIs during the dump process, even those who have
+a kernel module for handling. This avoid the interruption of the dump process,
+thus having a non-usable coredump.
 
 
 -------------
@@ -110,7 +135,7 @@ How to test it
 Generate an NMI
 ---------------
 
-- openipmi chassis power diag
+- ipmitool chassis power diag
 - vboxmanage debugvm "VMName" injectnmi
 - virsh inject-nmi "VMName"
 
