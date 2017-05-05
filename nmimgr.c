@@ -24,19 +24,14 @@
  *
  * Parameters:
  * - events_panic=LIST  Events to make the kernel Panic
- * - events_ignore=LIST Events to drop, so no other handler can process them
+ * - events_drop=LIST   Events to drop, so no other handler can process them
+ * - events_ignore=LIST Events to ignore silently
  *
  *
- * over. Usually, this is done by generating a NMI:
+ * Usually, this is done by generating a NMI:
  * - openipmi chassis power diag
  * - vboxmanage debugvm "VMName" injectnmi
  * - virsh inject-nmi "VMName"
- *
- * Usual NMI events (in decimal, to be used as module parameters):
- * - HP Ilo : 32,48
- * - Dell IDRAC: 32,33,48,49
- * - IBM : 44,60
- * - VirtualBox: 0,16,32,48
  *
  * If you see in your system logs messages like :
  * "hhuh. NMI received for unknown reason <xx>" and believe it should have
@@ -78,8 +73,10 @@
 #define NMIMGR_NBMAX	256
 
 static int events_panic_list[NMIMGR_NBMAX];
+static int events_drop_list[NMIMGR_NBMAX];
 static int events_ignore_list[NMIMGR_NBMAX];
 static char *events_panic;
+static char *events_drop;
 static char *events_ignore;
 
 
@@ -130,43 +127,42 @@ static int __nmimgr_handle(unsigned int type, unsigned char reason)
 
 	int i;
 
+	/* Check for ignored NMI */
+	for(i=1; i<NMIMGR_NBMAX; i++) {
+		if (reason == events_ignore_list[i])
+			return NMI_DONE;
+	}
+
+
 	pr_notice(NMIMGR_NAME": Handling new NMI type:%u event:0x%02x (%d)\n", type, reason, reason);
 
-	/* Check for discarded NMI */
+	/* Check for dropped NMI */
 	for(i=1; i<NMIMGR_NBMAX; i++) {
-		int j = events_ignore_list[i];
 
-		pr_debug(NMIMGR_NAME": Ignore: Checking 0x%02x(%d) against 0x%02x (%d)\n", reason, reason, j, j);
-
-		if (reason == j) {
-			pr_notice(NMIMGR_NAME": Ignore: dropping NMI event 0x%02x (%d)\n", reason, reason);
+		if (reason == events_drop_list[i]) {
+			pr_notice(NMIMGR_NAME": Drop: dropping NMI event 0x%02x (%d)\n", reason, reason);
 			return NMI_HANDLED;
 		}
 	}
 
 	/* Check for Panic NMI */
 	for(i=1; i<NMIMGR_NBMAX; i++) {
-		int j = events_panic_list[i];
 
-		pr_debug(NMIMGR_NAME": Panic: Checking 0x%02x(%d) against 0x%02x (%d)\n", reason, reason, j, j);
-
-		if (reason == j) {
+		if (reason == events_panic_list[i]) {
 			pr_emerg(NMIMGR_NAME": Panic: Event 0x%02x(%d) triggered panic\n", reason, reason);
-/*
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,5,0)
 			nmi_panic(regs, "NMIMGR: Hit explicit panic reason");
 #else
-*/
 			panic("NMIMGR: Hit explicit panic reason");
-/*
 #endif
-*/
+
 		}
 	}
 
+	/* Still there: unmanaged NMI Code. Send to other handlers */
 	pr_notice(NMIMGR_NAME": Unmanaged NMI 0x%02x(%d), let other handlers process it\n", reason, reason);
 		
-	/* Still there: unmanaged NMI Code. Send to other handlers */
 	return NMI_DONE;
 }
 
@@ -336,6 +332,23 @@ static int __init nmimgr_setup_ignore(char *str)
 }
 __setup("nmimgr.events_ignore=", nmimgr_setup_ignore);
 
+/**
+ *
+ */
+static int __init nmimgr_setup_drop(char *str)
+{
+	char *ret = 0;
+
+	pr_info(NMIMGR_NAME ": Setting drop from '%s'\n", events_drop);
+	ret = get_options(str, ARRAY_SIZE(events_drop_list), events_drop_list);
+	if (ret && *ret != 0) {
+		pr_err(NMIMGR_NAME ": Error, invalid or too many events_drop= values, return %s\n", ret);
+		return 0;
+	}
+	return 1;
+}
+__setup("nmimgr.events_drop=", nmimgr_setup_drop);
+
 
 
 /**
@@ -349,6 +362,7 @@ int __init init_module(void)
 
 	nmimgr_setup_panic(events_panic);
 	nmimgr_setup_ignore(events_ignore);
+	nmimgr_setup_drop(events_drop);
 
 	err = nmimgr_register();
 	if (err) {
@@ -374,7 +388,8 @@ module_exit(clean_module);
 
 
 MODULE_AUTHOR("Adrien Mahieux <adrien.mahieux@gmail.com");
-MODULE_DESCRIPTION("Remap specified NMI codes to generate a Panic (then kdump)\n"
+MODULE_DESCRIPTION("Remap specified NMI codes to generate a Panic (to trigger kdump)\n"
+					"or drops specific events (self-test or while kdump'ing)\n"
 					"Also reads kernel parameter events_panic= upon loading");
 MODULE_LICENSE("GPL");
 MODULE_VERSION(NMIMGR_VERSION);
@@ -384,4 +399,7 @@ module_param(events_panic, charp, 0444);
 MODULE_PARM_DESC(events_panic, "List of NMIs to panic upon receiving");
 
 module_param(events_ignore, charp, 0444);
-MODULE_PARM_DESC(events_ignore, "List of NMIs to block and ignore upon receiving");
+MODULE_PARM_DESC(events_ignore, "List of NMIs to ignore silently");
+
+module_param(events_drop, charp, 0444);
+MODULE_PARM_DESC(events_drop, "List of NMIs to block and drop from other handlers");
