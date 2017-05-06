@@ -3,12 +3,12 @@
  *
  * This module allows you to Panic or Ignore specific NMI events.
  *
- * Adrien Mahieux <adrien.mahieux@gmail.com>
+ * Adrien Mahieux
  * See also: https://fr.slideshare.net/Saruspete/kernel-crashdump-53496836
  * And tools: https://github.com/saruspete/kdumptools
  *
  *
- * Manage NMI events in a more fine-grained manner than "uknown_nmi_panic".
+ * Manage NMI events in a more fine-grained manner than "unknown_nmi_panic".
  * When a production host is unresponsive, we'd like to take a Kernel Dump.
  * If kdump is correctly setup, we need to crash the system for it to start
  *
@@ -47,7 +47,7 @@
  * 3.2   : Moved NMI descriptions to an enum: LOCAL, UNKNOWN, MAX 
  *         https://lwn.net/Articles/461215/
  *         https://lkml.org/lkml/2012/3/8/386
- * 3.5   : Moved "register_nmi_handler" to a macro + static struct nmiaction fn##_na
+ * 3.5   : Moved "register_nmi_handler" to macro + static struct nmiaction fn##_na
  */
 
 #include <linux/module.h>
@@ -68,7 +68,7 @@
 #endif
 
 
-#define NMIMGR_VERSION  "0.2"
+#define NMIMGR_VERSION  "0.3"
 #define NMIMGR_NAME     "nmimgr"
 #define NMIMGR_NBMAX	256
 
@@ -81,48 +81,10 @@ static char *events_ignore;
 
 
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,2,0)
-/* Borrowed from nmi.c */
-/*
-#define nmi_to_desc(type) (&nmi_desc[type])
-struct nmi_desc {
-	spinlock_t lock;
-	struct list_head head;
-};
-static struct nmi_desc *nmi_desc = 0xFFFFFFFF819556A0;
-
-static void nmimgr_showhandlers(unsigned int type)
-{
-	struct nmi_desc *desc = nmi_to_desc(type);
-	struct nmiaction *n, *m = NULL;
-	unsigned long flags;
-
-	pr_notice("== Current handlers for type %u\n", type);
-
-	spin_lock_irqsave(&desc->lock, flags);
-	list_for_each_entry_rcu(n, &desc->head, list) {
-		if (m == n)
-			break;
-
-		pr_notice("%p: %s (%lu) prev:%p next:%p\n", n->handler, n->name, n->flags, n->list.prev, n->list.next);
-
-		if (!m)
-			m = n;
-	}
-	spin_unlock_irqrestore(&desc->lock, flags);
-
-}
-*/
-/*
- Silly Debug. Use it with : 
-for(j=NMI_LOCAL+1;j<NMI_MAX;j++) nmimgr_showhandlers(j);
-*/
-#endif
-
 /**
  * Handler
  */
-static int __nmimgr_handle(unsigned int type, unsigned char reason)
+static int __nmimgr_handle(unsigned int type, unsigned char reason, struct pt_regs *regs)
 {
 
 	int i;
@@ -174,7 +136,7 @@ static int __nmimgr_handle(unsigned int type, unsigned char reason)
 
 static int nmimgr_handle(struct notifier_block *nb, unsigned long reason, void *data)
 {
-	return __nmimgr_handle(1, (unsigned char)reason);
+	return __nmimgr_handle(1, (unsigned char)reason, NULL);
 }
 
 
@@ -214,7 +176,7 @@ static void nmimgr_unregister(void)
 
 static int nmimgr_handle(unsigned int type, struct pt_regs *regs)
 {
-	return __nmimgr_handle(type, x86_platform.get_nmi_reason());
+	return __nmimgr_handle(type, x86_platform.get_nmi_reason(), regs);
 }
 
 
@@ -227,10 +189,12 @@ static int nmimgr_register(void)
 	int ret = 0;
 	int i;
 
-/* This wont work because of Macro rewriting of register_nmi_handler (https://lkml.org/lkml/2012/3/8/386)
+	/* This wont work because of Macro rewriting of
+	 * register_nmi_handler (https://lkml.org/lkml/2012/3/8/386)
+	 */
+	/*
 	for (i=NMI_LOCAL+1; i<NMI_MAX; i++) {
 		pr_notice(NMIMGR_NAME": registering type %d\n", i);
-for(j=NMI_LOCAL+1;j<NMI_MAX;j++) nmimgr_showhandlers(j);
 
 		ret = register_nmi_handler(i, nmimgr_handle, NMI_FLAG_FIRST, NMIMGR_NAME);
 		pr_notice(NMIMGR_NAME": Registered type %d: %d\n", i, ret);
@@ -238,10 +202,8 @@ for(j=NMI_LOCAL+1;j<NMI_MAX;j++) nmimgr_showhandlers(j);
 			pr_warning(NMIMGR_NAME ": Unable to register NMI class %d\n", i);
 			goto err;
 		}
-for(j=NMI_LOCAL+1;j<NMI_MAX;j++) nmimgr_showhandlers(j);
 	}
-*/
-
+	*/
 
 	/* We register our handler first, as we only manage a specific list */
 	ret = register_nmi_handler(NMI_UNKNOWN, nmimgr_handle, NMI_FLAG_FIRST, NMIMGR_NAME);
