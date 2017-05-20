@@ -1,45 +1,26 @@
-/**
- * NMI Manager
+/*
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2, or (at your option) any
+ * later version
  *
- * This module allows you to Panic or Ignore specific NMI events.
- *
- * Adrien Mahieux
- * See also: https://fr.slideshare.net/Saruspete/kernel-crashdump-53496836
- * And tools: https://github.com/saruspete/kdumptools
- *
- *
- * Manage NMI events in a more fine-grained manner than "unknown_nmi_panic".
- * When a production host is unresponsive, we'd like to take a Kernel Dump.
- * If kdump is correctly setup, we need to crash the system for it to start
- *
- * But if no handler registers the vendor-specific NMI event to trigger a
- * crash, the kernel logs a "Dazed and confused, but trying to continue"
- * message and server is still unresponsive.
- *
- *
- * Usage as a module: 
- *  insmod nmimgr.ko events_panic=0,1,2,5-12,13,255 events_ignore=99
- * Usage as Kernel builtin:
- *   nmimgr.events_panic=0,1,2,5-12,13,255 nmimgr.events_ignore=99
- *
- * Parameters:
- * - events_panic=LIST  Events to make the kernel Panic
- * - events_drop=LIST   Events to drop, so no other handler can process them
- * - events_ignore=LIST Events to ignore silently
- *
- *
- * Usually, this is done by generating a NMI:
- * - openipmi chassis power diag
- * - vboxmanage debugvm "VMName" injectnmi
- * - virsh inject-nmi "VMName"
- *
- * If you see in your system logs messages like :
- * "hhuh. NMI received for unknown reason <xx>" and believe it should have
- * panic'd the system, translate the "xx" hex number to decimal and use this
- * module to panic the system.
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details
  *
  */
 
+/***************************************************************************
+ * NMI Generic Handler
+ *
+ * Manage NMI events in a more fine-grained manner than "unknown_nmi_panic".
+ * Allows you to Panic or Ignore specific NMI events.
+ *
+ * Written by: Adrien Mahieux
+ * See also:   https://fr.slideshare.net/Saruspete/kernel-crashdump-53496836
+ *         :>  https://github.com/saruspete/kdumptools
+ */
 
 /*
  * Kernel Revision history:
@@ -47,7 +28,7 @@
  * 3.2   : Moved NMI descriptions to an enum: LOCAL, UNKNOWN, MAX 
  *         https://lwn.net/Articles/461215/
  *         https://lkml.org/lkml/2012/3/8/386
- * 3.5   : Moved "register_nmi_handler" to macro + static struct nmiaction fn##_na
+ * 3.5   : Moved register_nmi_handler to macro+static struct nmiaction fn##_na
  */
 
 #include <linux/module.h>
@@ -56,6 +37,8 @@
 #include <linux/init.h>
 #include <linux/version.h>
 #include <linux/nmi.h>
+
+#include <asm/nmi.h>
 
 /* Compatibility management */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,2,0)
@@ -68,9 +51,9 @@
 #endif
 
 
-#define NMIMGR_VERSION  "0.3"
+#define NMIMGR_VERSION  "0.4"
 #define NMIMGR_NAME     "nmimgr"
-#define NMIMGR_NBMAX	256
+#define NMIMGR_NBMAX    256
 
 static int events_panic_list[NMIMGR_NBMAX];
 static int events_drop_list[NMIMGR_NBMAX];
@@ -84,7 +67,8 @@ static char *events_ignore;
 /**
  * Handler
  */
-static int __nmimgr_handle(unsigned int type, unsigned char reason, struct pt_regs *regs)
+static int __nmimgr_handle(unsigned int type, unsigned char reason,
+			struct pt_regs *regs)
 {
 
 	int i;
@@ -96,13 +80,15 @@ static int __nmimgr_handle(unsigned int type, unsigned char reason, struct pt_re
 	}
 
 
-	pr_notice(NMIMGR_NAME": Handling new NMI type:%u event:0x%02x (%d)\n", type, reason, reason);
+	pr_notice(NMIMGR_NAME": Handling new NMI type:%u event:0x%02x (%d)\n",
+		type, reason, reason);
 
 	/* Check for dropped NMI */
 	for(i=1; i<NMIMGR_NBMAX; i++) {
 
 		if (reason == events_drop_list[i]) {
-			pr_notice(NMIMGR_NAME": Drop: dropping NMI event 0x%02x (%d)\n", reason, reason);
+			pr_notice(NMIMGR_NAME": Drop NMI event:0x%02x (%d)\n",
+				reason, reason);
 			return NMI_HANDLED;
 		}
 	}
@@ -111,19 +97,21 @@ static int __nmimgr_handle(unsigned int type, unsigned char reason, struct pt_re
 	for(i=1; i<NMIMGR_NBMAX; i++) {
 
 		if (reason == events_panic_list[i]) {
-			pr_emerg(NMIMGR_NAME": Panic: Event 0x%02x(%d) triggered panic\n", reason, reason);
+			pr_emerg(NMIMGR_NAME": Panic on Event:0x%02x(%d)\n",
+				reason, reason);
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,5,0)
-			nmi_panic(regs, "NMIMGR: Hit explicit panic reason");
+			nmi_panic(regs, NMIMGR_NAME": Hit explicit panic");
 #else
-			panic("NMIMGR: Hit explicit panic reason");
+			panic(NMIMGR_NAME": Hit explicit panic");
 #endif
 
 		}
 	}
 
 	/* Still there: unmanaged NMI Code. Send to other handlers */
-	pr_notice(NMIMGR_NAME": Unmanaged NMI 0x%02x(%d), let other handlers process it\n", reason, reason);
+	pr_notice(NMIMGR_NAME": Unmanaged NMI event:0x%02x (%d), let it pass\n",
+		reason, reason);
 		
 	return NMI_DONE;
 }
@@ -131,10 +119,11 @@ static int __nmimgr_handle(unsigned int type, unsigned char reason, struct pt_re
 
 
 
-/***** Kernel < 3.2 ***********************************************************/
+/***** Kernel < 3.2 **********************************************************/
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,2,0)
 
-static int nmimgr_handle(struct notifier_block *nb, unsigned long reason, void *data)
+static int nmimgr_handle(struct notifier_block *nb, unsigned long reason,
+			void *data)
 {
 	return __nmimgr_handle(1, (unsigned char)reason, NULL);
 }
@@ -206,20 +195,23 @@ static int nmimgr_register(void)
 	*/
 
 	/* We register our handler first, as we only manage a specific list */
-	ret = register_nmi_handler(NMI_UNKNOWN, nmimgr_handle, NMI_FLAG_FIRST, NMIMGR_NAME);
+	ret = register_nmi_handler(
+	    NMI_UNKNOWN, nmimgr_handle, NMI_FLAG_FIRST, NMIMGR_NAME);
 	if (ret) {
 		pr_warning(NMIMGR_NAME ": Unable to register NMI_UNKNOWN\n");
 		i = NMI_UNKNOWN-1;
 		goto err;
 	}
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,5,0)
-	ret = register_nmi_handler(NMI_SERR, nmimgr_handle, NMI_FLAG_FIRST, NMIMGR_NAME);
+	ret = register_nmi_handler(
+		NMI_SERR, nmimgr_handle, NMI_FLAG_FIRST, NMIMGR_NAME);
 	if (ret) {
 		pr_warning(NMIMGR_NAME ": Unable to register NMI_SERR\n");
 		i = NMI_SERR-1;
 		goto err;
 	}
-	ret = register_nmi_handler(NMI_IO_CHECK, nmimgr_handle, NMI_FLAG_FIRST, NMIMGR_NAME);
+	ret = register_nmi_handler(
+		NMI_IO_CHECK, nmimgr_handle, NMI_FLAG_FIRST, NMIMGR_NAME);
 	if (ret) {
 		pr_warning(NMIMGR_NAME ": Unable to register NMI_IO_CHECK\n");
 		i = NMI_IO_CHECK-1;
@@ -254,7 +246,7 @@ static void nmimgr_unregister(void)
 
 #endif
 
-/******************************************************************************/
+/*****************************************************************************/
 
 
 
@@ -265,11 +257,11 @@ static int __init nmimgr_setup_panic(char *str)
 {
 	char *ret = 0;
 	
-	/* from lib/cmdline.c : Extract the int list from str into events_panic_list[] */
+	/* lib/cmdline.c: Extract int list from str into events_panic_list[] */
 	pr_info(NMIMGR_NAME ": Setting panic from '%s'\n", events_panic);
 	ret = get_options(str, ARRAY_SIZE(events_panic_list), events_panic_list);
 	if (ret && *ret != 0) {
-		pr_err(NMIMGR_NAME ": Error, invalid or too many events_panic= values, return %s", ret);
+		pr_err(NMIMGR_NAME": Invalid events_panic, ret:%s\n", ret);
 		return 0;
 	}
 	return 1;
@@ -284,10 +276,10 @@ static int __init nmimgr_setup_ignore(char *str)
 {
 	char *ret = 0;
 
-	pr_info(NMIMGR_NAME ": Setting ignore from '%s'\n", events_ignore);
+	pr_info(NMIMGR_NAME": Setting ignore from '%s'\n", events_ignore);
 	ret = get_options(str, ARRAY_SIZE(events_ignore_list), events_ignore_list);
 	if (ret && *ret != 0) {
-		pr_err(NMIMGR_NAME ": Error, invalid or too many events_ignore= values, return %s\n", ret);
+		pr_err(NMIMGR_NAME": Invalid events_ignore, ret:%s\n", ret);
 		return 0;
 	}
 	return 1;
@@ -301,10 +293,10 @@ static int __init nmimgr_setup_drop(char *str)
 {
 	char *ret = 0;
 
-	pr_info(NMIMGR_NAME ": Setting drop from '%s'\n", events_drop);
+	pr_info(NMIMGR_NAME": Setting drop from '%s'\n", events_drop);
 	ret = get_options(str, ARRAY_SIZE(events_drop_list), events_drop_list);
 	if (ret && *ret != 0) {
-		pr_err(NMIMGR_NAME ": Error, invalid or too many events_drop= values, return %s\n", ret);
+		pr_err(NMIMGR_NAME": Invalid events_drop, ret:%s\n", ret);
 		return 0;
 	}
 	return 1;
@@ -328,7 +320,7 @@ int __init init_module(void)
 
 	err = nmimgr_register();
 	if (err) {
-		pr_warning(NMIMGR_NAME ": The NMI Management is not available");
+		pr_warning(NMIMGR_NAME": The NMI Management is not available");
 		return err;
 	}
 	return 0;
@@ -350,9 +342,9 @@ module_exit(clean_module);
 
 
 MODULE_AUTHOR("Adrien Mahieux <adrien.mahieux@gmail.com");
-MODULE_DESCRIPTION("Remap specified NMI codes to generate a Panic (to trigger kdump)\n"
-					"or drops specific events (self-test or while kdump'ing)\n"
-					"Also reads kernel parameter events_panic= upon loading");
+MODULE_DESCRIPTION("Remap specified NMI codes to generate a Panic\n"
+	"or drops specific events (self-test or while kdump'ing)\n"
+	"Also reads kernel parameter events_panic= upon loading");
 MODULE_LICENSE("GPL");
 MODULE_VERSION(NMIMGR_VERSION);
 
@@ -364,4 +356,4 @@ module_param(events_ignore, charp, 0444);
 MODULE_PARM_DESC(events_ignore, "List of NMIs to ignore silently");
 
 module_param(events_drop, charp, 0444);
-MODULE_PARM_DESC(events_drop, "List of NMIs to block and drop from other handlers");
+MODULE_PARM_DESC(events_drop, "List of NMIs to hide from other handlers");
