@@ -112,7 +112,7 @@ static int __nmimgr_handle(unsigned int type, unsigned char reason,
 	/* Still there: unmanaged NMI Code. Send to other handlers */
 	pr_notice(NMIMGR_NAME": Unmanaged NMI event:0x%02x (%d), let it pass\n",
 		reason, reason);
-		
+
 	return NMI_DONE;
 }
 
@@ -122,10 +122,25 @@ static int __nmimgr_handle(unsigned int type, unsigned char reason,
 /***** Kernel < 3.2 **********************************************************/
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,2,0)
 
-static int nmimgr_handle(struct notifier_block *nb, unsigned long reason,
+static int nmimgr_handle(struct notifier_block *nb, unsigned long val,
 			void *data)
 {
-	return __nmimgr_handle(1, (unsigned char)reason, NULL);
+	struct die_args *args = (struct die_args *)data;
+	unsigned char reason = args->err;
+
+	/* Only process NMI cases */
+	switch(val) {
+		case DIE_NMI:
+		case DIE_NMIWATCHDOG:
+		case DIE_NMI_IPI:
+		case DIE_NMIUNKNOWN:
+			return __nmimgr_handle(1, reason, args->regs);
+			break;
+		default:
+		     break;
+	}
+
+	return NOTIFY_OK;
 }
 
 
