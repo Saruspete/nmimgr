@@ -235,7 +235,6 @@ static int nmimgr_register(void)
 #endif
 
 
-	pr_notice(NMIMGR_NAME ": Registered NMIs\n");
 	return 0;
 
 err:
