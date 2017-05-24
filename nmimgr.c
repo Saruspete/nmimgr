@@ -272,8 +272,12 @@ static int __init nmimgr_setup_panic(char *str)
 {
 	char *ret = 0;
 	
+	if (!str)
+		return 1;
+
+	pr_info(NMIMGR_NAME ": panic events: %s\n", str);
+
 	/* lib/cmdline.c: Extract int list from str into events_panic_list[] */
-	pr_info(NMIMGR_NAME ": Setting panic from '%s'\n", events_panic);
 	ret = get_options(str, ARRAY_SIZE(events_panic_list), events_panic_list);
 	if (ret && *ret != 0) {
 		pr_err(NMIMGR_NAME": Invalid events_panic, ret:%s\n", ret);
@@ -291,7 +295,11 @@ static int __init nmimgr_setup_ignore(char *str)
 {
 	char *ret = 0;
 
-	pr_info(NMIMGR_NAME": Setting ignore from '%s'\n", events_ignore);
+	if (!str)
+		return 1;
+
+	pr_info(NMIMGR_NAME": ignore events: %s\n", str);
+
 	ret = get_options(str, ARRAY_SIZE(events_ignore_list), events_ignore_list);
 	if (ret && *ret != 0) {
 		pr_err(NMIMGR_NAME": Invalid events_ignore, ret:%s\n", ret);
@@ -308,7 +316,11 @@ static int __init nmimgr_setup_drop(char *str)
 {
 	char *ret = 0;
 
-	pr_info(NMIMGR_NAME": Setting drop from '%s'\n", events_drop);
+	if (!str)
+		return 1;
+
+	pr_info(NMIMGR_NAME": drop events: %s\n", str);
+
 	ret = get_options(str, ARRAY_SIZE(events_drop_list), events_drop_list);
 	if (ret && *ret != 0) {
 		pr_err(NMIMGR_NAME": Invalid events_drop, ret:%s\n", ret);
@@ -335,7 +347,7 @@ int __init init_module(void)
 
 	err = nmimgr_register();
 	if (err) {
-		pr_warning(NMIMGR_NAME": The NMI Management is not available");
+		pr_warning(NMIMGR_NAME": NMI Management not available\n");
 		return err;
 	}
 	return 0;
@@ -348,7 +360,7 @@ int __init init_module(void)
 void __exit clean_module(void)
 {
 	nmimgr_unregister();
-	pr_notice(NMIMGR_NAME": unloaded module");
+	pr_notice(NMIMGR_NAME": unloaded module\n");
 }
 
 module_exit(clean_module);
