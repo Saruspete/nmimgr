@@ -25,7 +25,7 @@
 /*
  * Kernel Revision history:
  * 2.6.32: Using notifier_block structs
- * 3.2   : Moved NMI descriptions to an enum: LOCAL, UNKNOWN, MAX 
+ * 3.2   : Moved NMI descriptions to an enum: LOCAL, UNKNOWN, MAX
  *         https://lwn.net/Articles/461215/
  *         https://lkml.org/lkml/2012/3/8/386
  * 3.5   : Moved register_nmi_handler to macro+static struct nmiaction fn##_na
@@ -42,7 +42,7 @@
 
 /* Compatibility management */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,2,0)
-#include <linux/notifier.h> 
+#include <linux/notifier.h>
 #include <linux/kdebug.h>    /* For NMI_DIE and NMI_DIE_IPI */
 
 /* HANDLED=1, OK=1, DONE=0  */
@@ -161,7 +161,7 @@ static int nmimgr_register(void)
 		pr_warning(NMIMGR_NAME": Unable to register NMI handler\n");
 		return ret;
 	}
-	
+
 	pr_notice(NMIMGR_NAME": Registered handler\n");
 
 	return 0;
@@ -253,7 +253,6 @@ static void nmimgr_unregister(void)
 	int i;
 
 	for (i=NMI_MAX-1; i>NMI_LOCAL; i--) {
-		pr_notice(NMIMGR_NAME": Unregistering type %d\n", i);
 		unregister_nmi_handler(i, NMIMGR_NAME);
 	}
 }
@@ -270,7 +269,7 @@ static void nmimgr_unregister(void)
 static int __init nmimgr_setup_panic(char *str)
 {
 	char *ret = 0;
-	
+
 	if (!str)
 		return 1;
 
@@ -332,7 +331,7 @@ __setup("nmimgr.events_drop=", nmimgr_setup_drop);
 
 
 /**
- * Module initialization 
+ * Module initialization
  */
 int __init init_module(void)
 {
