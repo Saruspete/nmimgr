@@ -193,7 +193,7 @@ if [[ -f "$MYPATH/Makefile" ]] && [[ -f "$MYPATH/$KRN_MODNAME.c" ]]; then
 
 		! [[ -d "$kpath/build/include" ]] && {
 			echo "[W] Skipping $kvers (cannot find '$kpath/build/include')"
-			break
+			continue
 		}
 
 		echo "[I] Building module for kernel $kvers..."
