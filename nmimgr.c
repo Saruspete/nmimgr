@@ -30,6 +30,8 @@
 #include <linux/notifier.h>
 #include <linux/kdebug.h>    /* For NMI_DIE and NMI_DIE_IPI */
 
+#include <asm/kdebug.h>
+
 /* HANDLED=1, OK=1, DONE=0  */
 #define NMI_HANDLED NOTIFY_OK
 #define NMI_DONE    NOTIFY_DONE
@@ -41,9 +43,11 @@
 #define NMIMGR_NBMAX    256
 
 static int events_panic_list[NMIMGR_NBMAX];
+static int events_debug_list[NMIMGR_NBMAX];
 static int events_drop_list[NMIMGR_NBMAX];
 static int events_ignore_list[NMIMGR_NBMAX];
 static char *events_panic;
+static char *events_debug;
 static char *events_drop;
 static char *events_ignore;
 
@@ -67,6 +71,20 @@ static int __nmimgr_handle(unsigned int type, unsigned char reason,
 
 	pr_notice(NMIMGR_NAME": Handling new NMI type:%u event:0x%02x (%d)\n",
 		type, reason, reason);
+
+	/* Debugging NMI */
+	for (i = 1; i < NMIMGR_NBMAX; i++ ) {
+		if (reason == events_debug_list[i]) {
+			pr_notice(NMIMGR_NAME": Debug NMI");
+			dump_stack();
+
+#ifndef MODULE
+			/* show_regs is not exported */
+			show_regs(regs);
+#endif
+		}
+	}
+
 
 	/* Check for dropped NMI */
 	for (i = 1; i < NMIMGR_NBMAX; i++) {
@@ -262,6 +280,30 @@ __setup("nmimgr.events_panic=", nmimgr_setup_panic);
 /**
  *
  */
+static int __init nmimgr_setup_debug(char *str)
+{
+	char *ret = 0;
+
+	if (!str)
+		return 1;
+
+	pr_info(NMIMGR_NAME ": debug events: %s\n", str);
+
+	/* lib/cmdline.c: Extract int list from str into events_panic_list[] */
+	ret = get_options(str, ARRAY_SIZE(events_debug_list),
+		events_debug_list);
+	if (ret && *ret != 0) {
+		pr_err(NMIMGR_NAME": Invalid events_debug, ret:%s\n", ret);
+		return 0;
+	}
+	return 1;
+}
+__setup("nmimgr.events_debug=", nmimgr_setup_debug);
+
+
+/**
+ *
+ */
 static int __init nmimgr_setup_ignore(char *str)
 {
 	char *ret = 0;
@@ -314,8 +356,9 @@ int __init init_module(void)
 
 	pr_notice(NMIMGR_NAME ": Loaded module v%s\n", NMIMGR_VERSION);
 
-	nmimgr_setup_panic(events_panic);
 	nmimgr_setup_ignore(events_ignore);
+	nmimgr_setup_debug(events_debug);
+	nmimgr_setup_panic(events_panic);
 	nmimgr_setup_drop(events_drop);
 
 	err = nmimgr_register();
@@ -351,6 +394,9 @@ MODULE_VERSION(NMIMGR_VERSION);
 /* Parameters */
 module_param(events_panic, charp, 0444);
 MODULE_PARM_DESC(events_panic, "List of NMIs to panic upon receiving");
+
+module_param(events_debug, charp, 0444);
+MODULE_PARM_DESC(events_debug, "List of NMIs to show debug upon receiving");
 
 module_param(events_ignore, charp, 0444);
 MODULE_PARM_DESC(events_ignore, "List of NMIs to ignore silently");
