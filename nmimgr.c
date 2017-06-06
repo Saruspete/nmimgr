@@ -1,25 +1,9 @@
 /*
+ * Copyright (C) 2017 Adrien Mahieux <adrien.mahieux@gmail.com>
+ *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2, or (at your option) any
- * later version
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details
- *
- */
-
-/***************************************************************************
- * NMI Generic Handler
- *
- * Manage NMI events in a more fine-grained manner than "unknown_nmi_panic".
- * Allows you to Panic or Ignore specific NMI events.
- *
- * Written by: Adrien Mahieux
- * See also:   https://fr.slideshare.net/Saruspete/kernel-crashdump-53496836
- *         :>  https://github.com/saruspete/kdumptools
+ * under the terms of the GNU General Public License version 2 as published
+ * by the Free Software Foundation.
  */
 
 /*
@@ -39,9 +23,10 @@
 #include <linux/nmi.h>
 
 #include <asm/nmi.h>
+#include <asm/x86_init.h>
 
 /* Compatibility management */
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,2,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 2, 0)
 #include <linux/notifier.h>
 #include <linux/kdebug.h>    /* For NMI_DIE and NMI_DIE_IPI */
 
@@ -74,7 +59,7 @@ static int __nmimgr_handle(unsigned int type, unsigned char reason,
 	int i;
 
 	/* Check for ignored NMI */
-	for(i=1; i<NMIMGR_NBMAX; i++) {
+	for (i = 1; i < NMIMGR_NBMAX; i++) {
 		if (reason == events_ignore_list[i])
 			return NMI_DONE;
 	}
@@ -84,7 +69,7 @@ static int __nmimgr_handle(unsigned int type, unsigned char reason,
 		type, reason, reason);
 
 	/* Check for dropped NMI */
-	for(i=1; i<NMIMGR_NBMAX; i++) {
+	for (i = 1; i < NMIMGR_NBMAX; i++) {
 
 		if (reason == events_drop_list[i]) {
 			pr_notice(NMIMGR_NAME": Drop NMI event:0x%02x (%d)\n",
@@ -94,13 +79,13 @@ static int __nmimgr_handle(unsigned int type, unsigned char reason,
 	}
 
 	/* Check for Panic NMI */
-	for(i=1; i<NMIMGR_NBMAX; i++) {
+	for (i = 1; i < NMIMGR_NBMAX; i++) {
 
 		if (reason == events_panic_list[i]) {
 			pr_emerg(NMIMGR_NAME": Panic on Event:0x%02x(%d)\n",
 				reason, reason);
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,5,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 5, 0)
 			nmi_panic(regs, NMIMGR_NAME": Hit explicit panic");
 #else
 			panic(NMIMGR_NAME": Hit explicit panic");
@@ -120,7 +105,7 @@ static int __nmimgr_handle(unsigned int type, unsigned char reason,
 
 
 /***** Kernel < 3.2 **********************************************************/
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,2,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 2, 0)
 
 static int nmimgr_handle(struct notifier_block *nb, unsigned long val,
 			void *data)
@@ -129,15 +114,15 @@ static int nmimgr_handle(struct notifier_block *nb, unsigned long val,
 	unsigned char reason = args->err;
 
 	/* Only process NMI cases */
-	switch(val) {
-		case DIE_NMI:
-		case DIE_NMIWATCHDOG:
-		case DIE_NMI_IPI:
-		case DIE_NMIUNKNOWN:
-			return __nmimgr_handle(1, reason, args->regs);
-			break;
-		default:
-		     break;
+	switch (val) {
+	case DIE_NMI:
+	case DIE_NMIWATCHDOG:
+	case DIE_NMI_IPI:
+	case DIE_NMIUNKNOWN:
+		return __nmimgr_handle(1, reason, args->regs);
+
+	default:
+		break;
 	}
 
 	return NOTIFY_OK;
@@ -155,10 +140,10 @@ static struct notifier_block nmimgr_notifier = {
  */
 static int nmimgr_register(void)
 {
-	int ret;
-	ret = register_die_notifier(&nmimgr_notifier);
+	int ret = register_die_notifier(&nmimgr_notifier);
+
 	if (ret) {
-		pr_warning(NMIMGR_NAME": Unable to register NMI handler\n");
+		pr_warn(NMIMGR_NAME": Unable to register NMI handler\n");
 		return ret;
 	}
 
@@ -193,42 +178,30 @@ static int nmimgr_register(void)
 	int ret = 0;
 	int i;
 
-	/* This wont work because of Macro rewriting of
+	/* A loop wont work because of Macro rewriting of
 	 * register_nmi_handler (https://lkml.org/lkml/2012/3/8/386)
 	 */
-	/*
-	for (i=NMI_LOCAL+1; i<NMI_MAX; i++) {
-		pr_notice(NMIMGR_NAME": registering type %d\n", i);
-
-		ret = register_nmi_handler(i, nmimgr_handle, NMI_FLAG_FIRST, NMIMGR_NAME);
-		pr_notice(NMIMGR_NAME": Registered type %d: %d\n", i, ret);
-		if (ret) {
-			pr_warning(NMIMGR_NAME ": Unable to register NMI class %d\n", i);
-			goto err;
-		}
-	}
-	*/
 
 	/* We register our handler first, as we only manage a specific list */
 	ret = register_nmi_handler(
 	    NMI_UNKNOWN, nmimgr_handle, NMI_FLAG_FIRST, NMIMGR_NAME);
 	if (ret) {
-		pr_warning(NMIMGR_NAME ": Unable to register NMI_UNKNOWN\n");
+		pr_warn(NMIMGR_NAME ": Unable to register NMI_UNKNOWN\n");
 		i = NMI_UNKNOWN-1;
 		goto err;
 	}
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,5,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 5, 0)
 	ret = register_nmi_handler(
 		NMI_SERR, nmimgr_handle, NMI_FLAG_FIRST, NMIMGR_NAME);
 	if (ret) {
-		pr_warning(NMIMGR_NAME ": Unable to register NMI_SERR\n");
+		pr_warn(NMIMGR_NAME ": Unable to register NMI_SERR\n");
 		i = NMI_SERR-1;
 		goto err;
 	}
 	ret = register_nmi_handler(
 		NMI_IO_CHECK, nmimgr_handle, NMI_FLAG_FIRST, NMIMGR_NAME);
 	if (ret) {
-		pr_warning(NMIMGR_NAME ": Unable to register NMI_IO_CHECK\n");
+		pr_warn(NMIMGR_NAME ": Unable to register NMI_IO_CHECK\n");
 		i = NMI_IO_CHECK-1;
 		goto err;
 	}
@@ -238,9 +211,8 @@ static int nmimgr_register(void)
 	return 0;
 
 err:
-	for(; i>0; i--) {
+	for (; i > 0; i--)
 		unregister_nmi_handler(i, NMIMGR_NAME);
-	}
 
 	return ret;
 }
@@ -252,9 +224,9 @@ static void nmimgr_unregister(void)
 {
 	int i;
 
-	for (i=NMI_MAX-1; i>NMI_LOCAL; i--) {
+	for (i = NMI_MAX-1; i > NMI_LOCAL; i--)
 		unregister_nmi_handler(i, NMIMGR_NAME);
-	}
+
 }
 
 #endif
@@ -276,7 +248,8 @@ static int __init nmimgr_setup_panic(char *str)
 	pr_info(NMIMGR_NAME ": panic events: %s\n", str);
 
 	/* lib/cmdline.c: Extract int list from str into events_panic_list[] */
-	ret = get_options(str, ARRAY_SIZE(events_panic_list), events_panic_list);
+	ret = get_options(str, ARRAY_SIZE(events_panic_list),
+		events_panic_list);
 	if (ret && *ret != 0) {
 		pr_err(NMIMGR_NAME": Invalid events_panic, ret:%s\n", ret);
 		return 0;
@@ -298,7 +271,8 @@ static int __init nmimgr_setup_ignore(char *str)
 
 	pr_info(NMIMGR_NAME": ignore events: %s\n", str);
 
-	ret = get_options(str, ARRAY_SIZE(events_ignore_list), events_ignore_list);
+	ret = get_options(str, ARRAY_SIZE(events_ignore_list),
+		events_ignore_list);
 	if (ret && *ret != 0) {
 		pr_err(NMIMGR_NAME": Invalid events_ignore, ret:%s\n", ret);
 		return 0;
@@ -319,7 +293,8 @@ static int __init nmimgr_setup_drop(char *str)
 
 	pr_info(NMIMGR_NAME": drop events: %s\n", str);
 
-	ret = get_options(str, ARRAY_SIZE(events_drop_list), events_drop_list);
+	ret = get_options(str, ARRAY_SIZE(events_drop_list),
+		events_drop_list);
 	if (ret && *ret != 0) {
 		pr_err(NMIMGR_NAME": Invalid events_drop, ret:%s\n", ret);
 		return 0;
@@ -345,7 +320,7 @@ int __init init_module(void)
 
 	err = nmimgr_register();
 	if (err) {
-		pr_warning(NMIMGR_NAME": NMI Management not available\n");
+		pr_warn(NMIMGR_NAME": NMI Management not available\n");
 		return err;
 	}
 	return 0;
