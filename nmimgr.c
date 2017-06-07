@@ -21,6 +21,7 @@
 #include <linux/init.h>
 #include <linux/version.h>
 #include <linux/nmi.h>
+#include <linux/kallsyms.h>
 
 #include <asm/nmi.h>
 #include <asm/x86_init.h>
@@ -57,6 +58,29 @@ static char *events_drop;
 static char *events_panic;
 
 
+static void __nmimgr_trace(struct pt_regs *regs) {
+
+	static void (*sym_show_regs)(struct pt_regs*);
+
+	dump_stack();
+
+	/* show_regs is not exported */
+#ifdef MODULE
+#  ifdef CONFIG_KALLSYMS
+#    if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 33)
+	/* Try to find show_regs */
+	sym_show_regs = (void*)kallsyms_lookup_name("show_regs");
+	if (sym_show_regs)
+		sym_show_regs(regs);
+
+#    endif
+#  endif /* CONFIG_KALLSYMS */
+#else  /* MODULE */
+	show_regs(regs);
+#endif
+
+}
+
 
 /**
  * Handler
@@ -81,12 +105,7 @@ static int __nmimgr_handle(unsigned int type, unsigned char reason,
 	for (i = 1; i < NMIMGR_NBMAX; i++ ) {
 		if (reason == events_arr[OP_DEBUG][i]) {
 			pr_notice(NMIMGR_NAME": Debug NMI");
-			dump_stack();
-
-#ifndef MODULE
-			/* show_regs is not exported */
-			show_regs(regs);
-#endif
+			__nmimgr_trace(regs);
 		}
 	}
 
