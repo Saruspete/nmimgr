@@ -42,14 +42,19 @@
 #define NMIMGR_NAME     "nmimgr"
 #define NMIMGR_NBMAX    256
 
-static int events_panic_list[NMIMGR_NBMAX];
-static int events_debug_list[NMIMGR_NBMAX];
-static int events_drop_list[NMIMGR_NBMAX];
-static int events_ignore_list[NMIMGR_NBMAX];
-static char *events_panic;
+enum {
+	OP_IGNORE=0,
+	OP_DROP,
+	OP_DEBUG,
+	OP_PANIC
+};
+
+
+static int   events_arr[4][NMIMGR_NBMAX];
+static char *events_ignore;
 static char *events_debug;
 static char *events_drop;
-static char *events_ignore;
+static char *events_panic;
 
 
 
@@ -62,9 +67,9 @@ static int __nmimgr_handle(unsigned int type, unsigned char reason,
 
 	int i;
 
-	/* Check for ignored NMI */
+	/* ignored NMI */
 	for (i = 1; i < NMIMGR_NBMAX; i++) {
-		if (reason == events_ignore_list[i])
+		if (reason == events_arr[OP_IGNORE][i])
 			return NMI_DONE;
 	}
 
@@ -74,7 +79,7 @@ static int __nmimgr_handle(unsigned int type, unsigned char reason,
 
 	/* Debugging NMI */
 	for (i = 1; i < NMIMGR_NBMAX; i++ ) {
-		if (reason == events_debug_list[i]) {
+		if (reason == events_arr[OP_DEBUG][i]) {
 			pr_notice(NMIMGR_NAME": Debug NMI");
 			dump_stack();
 
@@ -86,20 +91,20 @@ static int __nmimgr_handle(unsigned int type, unsigned char reason,
 	}
 
 
-	/* Check for dropped NMI */
+	/* dropped NMI */
 	for (i = 1; i < NMIMGR_NBMAX; i++) {
 
-		if (reason == events_drop_list[i]) {
+		if (reason == events_arr[OP_DROP][i]) {
 			pr_notice(NMIMGR_NAME": Drop NMI event:0x%02x (%d)\n",
 				reason, reason);
 			return NMI_HANDLED;
 		}
 	}
 
-	/* Check for Panic NMI */
+	/* Panic NMI */
 	for (i = 1; i < NMIMGR_NBMAX; i++) {
 
-		if (reason == events_panic_list[i]) {
+		if (reason == events_arr[OP_PANIC][i]) {
 			pr_emerg(NMIMGR_NAME": Panic on Event:0x%02x(%d)\n",
 				reason, reason);
 
@@ -251,6 +256,23 @@ static void nmimgr_unregister(void)
 
 /*****************************************************************************/
 
+static int __init __nmimgr_setup(int op, char *str)
+{
+	char *ret = 0;
+
+	if (!str)
+		return 1;
+
+	/* lib/cmdline.c: Extract int list from str into events_panic_list[] */
+	ret = get_options(str, ARRAY_SIZE(events_arr[op]),
+		events_arr[op]);
+
+	if (ret && *ret != 0) {
+		pr_err(NMIMGR_NAME": Invalid input '%s', ret:%s\n", str, ret);
+		return 0;
+	}
+	return 1;
+}
 
 
 /**
@@ -258,21 +280,11 @@ static void nmimgr_unregister(void)
  */
 static int __init nmimgr_setup_panic(char *str)
 {
-	char *ret = 0;
-
 	if (!str)
 		return 1;
 
-	pr_info(NMIMGR_NAME ": panic events: %s\n", str);
-
-	/* lib/cmdline.c: Extract int list from str into events_panic_list[] */
-	ret = get_options(str, ARRAY_SIZE(events_panic_list),
-		events_panic_list);
-	if (ret && *ret != 0) {
-		pr_err(NMIMGR_NAME": Invalid events_panic, ret:%s\n", ret);
-		return 0;
-	}
-	return 1;
+	pr_info(NMIMGR_NAME ": events_panic: %s\n", str);
+	return __nmimgr_setup(OP_PANIC, str);
 }
 __setup("nmimgr.events_panic=", nmimgr_setup_panic);
 
@@ -282,21 +294,11 @@ __setup("nmimgr.events_panic=", nmimgr_setup_panic);
  */
 static int __init nmimgr_setup_debug(char *str)
 {
-	char *ret = 0;
-
 	if (!str)
 		return 1;
 
-	pr_info(NMIMGR_NAME ": debug events: %s\n", str);
-
-	/* lib/cmdline.c: Extract int list from str into events_panic_list[] */
-	ret = get_options(str, ARRAY_SIZE(events_debug_list),
-		events_debug_list);
-	if (ret && *ret != 0) {
-		pr_err(NMIMGR_NAME": Invalid events_debug, ret:%s\n", ret);
-		return 0;
-	}
-	return 1;
+	pr_info(NMIMGR_NAME ": events_debug: %s\n", str);
+	return __nmimgr_setup(OP_DEBUG, str);
 }
 __setup("nmimgr.events_debug=", nmimgr_setup_debug);
 
@@ -306,20 +308,11 @@ __setup("nmimgr.events_debug=", nmimgr_setup_debug);
  */
 static int __init nmimgr_setup_ignore(char *str)
 {
-	char *ret = 0;
-
 	if (!str)
 		return 1;
 
-	pr_info(NMIMGR_NAME": ignore events: %s\n", str);
-
-	ret = get_options(str, ARRAY_SIZE(events_ignore_list),
-		events_ignore_list);
-	if (ret && *ret != 0) {
-		pr_err(NMIMGR_NAME": Invalid events_ignore, ret:%s\n", ret);
-		return 0;
-	}
-	return 1;
+	pr_info(NMIMGR_NAME ": events_ignore: %s\n", str);
+	return __nmimgr_setup(OP_IGNORE, str);
 }
 __setup("nmimgr.events_ignore=", nmimgr_setup_ignore);
 
@@ -328,20 +321,11 @@ __setup("nmimgr.events_ignore=", nmimgr_setup_ignore);
  */
 static int __init nmimgr_setup_drop(char *str)
 {
-	char *ret = 0;
-
 	if (!str)
 		return 1;
 
-	pr_info(NMIMGR_NAME": drop events: %s\n", str);
-
-	ret = get_options(str, ARRAY_SIZE(events_drop_list),
-		events_drop_list);
-	if (ret && *ret != 0) {
-		pr_err(NMIMGR_NAME": Invalid events_drop, ret:%s\n", ret);
-		return 0;
-	}
-	return 1;
+	pr_info(NMIMGR_NAME ": events_drop: %s\n", str);
+	return __nmimgr_setup(OP_DROP, str);
 }
 __setup("nmimgr.events_drop=", nmimgr_setup_drop);
 
